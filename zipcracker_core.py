@@ -136,6 +136,15 @@ class TemplateKpaSuggestion:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class KpaTargetEntryInfo:
+    inner_name: str
+    compress_type: int
+    file_size: int
+    compress_size: int
+    payload_len: int
+
+
 def loc(locale: str, zh: str, en: str) -> str:
     return en if locale == "en" else zh
 
@@ -2033,6 +2042,187 @@ def compress_type_label(compress_type: int) -> str:
     return mapping.get(compress_type, str(compress_type))
 
 
+def kpa_target_entry_info_from_zipinfo(
+    inner_name: str,
+    info: zipfile.ZipInfo,
+    payload_len: Optional[int] = None,
+) -> KpaTargetEntryInfo:
+    if payload_len is None:
+        payload_len = info.compress_size - 12 if info.flag_bits & 0x1 else info.compress_size
+    return KpaTargetEntryInfo(
+        inner_name=inner_name,
+        compress_type=info.compress_type,
+        file_size=info.file_size,
+        compress_size=info.compress_size,
+        payload_len=max(0, payload_len),
+    )
+
+
+def get_kpa_target_entry_info(zip_path: str, inner_name: str) -> KpaTargetEntryInfo:
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        info = zf.getinfo(inner_name)
+        return kpa_target_entry_info_from_zipinfo(inner_name, info)
+
+
+def is_user_supplied_plaintext_file(plain_source: Optional[dict]) -> bool:
+    if not plain_source:
+        return False
+    if plain_source.get("source_kind") != "file":
+        return False
+    return not str(plain_source.get("display_path", "")).startswith("template:")
+
+
+def kpa_plaintext_layer_warning_lines(
+    locale: str,
+    target_info: KpaTargetEntryInfo,
+    plain_source: dict,
+) -> list[str]:
+    if target_info.compress_type == zipfile.ZIP_STORED:
+        return []
+    if not is_user_supplied_plaintext_file(plain_source):
+        return []
+
+    plaintext_len = len(plain_source["plaintext_bytes"])
+    compress_label = compress_type_label(target_info.compress_type)
+    lines = [
+        loc(
+            locale,
+            f"[!] KPA 提示: 目标条目 '{target_info.inner_name}' 使用 {compress_label} 压缩；普通原始文件不一定等于 bkcrack 需要的明文。",
+            f"[!] KPA note: target entry '{target_info.inner_name}' uses {compress_label} compression; a loose original file may not be the plaintext bytes required by bkcrack.",
+        ),
+        loc(
+            locale,
+            f"[*] ZIP 常见顺序是 原始内容 -> 压缩 -> ZipCrypto 加密。KPA 需要的是 ZipCrypto 加密前的数据流，压缩条目通常对应压缩后的字节流。",
+            f"[*] A common ZIP pipeline is original content -> compression -> ZipCrypto encryption. KPA needs the pre-encryption byte stream, which is usually compressed bytes for compressed entries.",
+        ),
+    ]
+    if plaintext_len > target_info.payload_len:
+        lines.append(
+            loc(
+                locale,
+                f"[!] 当前普通明文文件 {plaintext_len} 字节，大于目标加密载荷 {target_info.payload_len} 字节；bkcrack 可能报 ciphertext is smaller than plaintext。",
+                f"[!] The loose plaintext file is {plaintext_len} bytes, larger than the target encrypted payload ({target_info.payload_len} bytes); bkcrack may report: ciphertext is smaller than plaintext.",
+            )
+        )
+    lines.append(
+        loc(
+            locale,
+            "[*] 建议: 若条目不是 ZIP_STORED，优先提供同构的无密码对照 ZIP，或改用 --kpa-offset / -x / --kpa-template 的部分明文方式。",
+            "[*] Recommendation: for non-ZIP_STORED entries, prefer a matching unencrypted reference ZIP, or use partial plaintext with --kpa-offset / -x / --kpa-template.",
+        )
+    )
+    return lines
+
+
+def warn_if_kpa_plaintext_layer_may_mismatch(
+    zip_path: str,
+    inner_name: str,
+    plain_source: dict,
+    locale: str,
+) -> None:
+    try:
+        target_info = get_kpa_target_entry_info(zip_path, inner_name)
+    except Exception:
+        return
+    for line in kpa_plaintext_layer_warning_lines(locale, target_info, plain_source):
+        print(line)
+
+
+def describe_kpa_plaintext_length_mismatch(
+    locale: str,
+    target_info: KpaTargetEntryInfo,
+    plain_source: dict,
+    plaintext_len: int,
+) -> str:
+    source_display = plain_source["display_path"]
+    lines = [
+        loc(
+            locale,
+            f"明文长度 ({plaintext_len}) 与密文载荷长度 ({target_info.payload_len}) 不一致。当前明文来源: {source_display}。",
+            f"Plaintext length ({plaintext_len}) does not match ciphertext payload length ({target_info.payload_len}). Current plaintext source: {source_display}.",
+        )
+    ]
+    if is_user_supplied_plaintext_file(plain_source) and target_info.compress_type != zipfile.ZIP_STORED:
+        lines.extend(
+            [
+                loc(
+                    locale,
+                    f"目标条目 '{target_info.inner_name}' 使用 {compress_type_label(target_info.compress_type)} 压缩；这里的“明文”应是 ZipCrypto 加密前的数据流，通常是压缩后的载荷，不是解压后的原始文件。",
+                    f"Target entry '{target_info.inner_name}' uses {compress_type_label(target_info.compress_type)} compression; here, plaintext means the pre-ZipCrypto byte stream, usually the compressed payload, not the original extracted file.",
+                ),
+                loc(
+                    locale,
+                    "如果你传入的是普通原始文件，这通常不是偏移量问题，--kpa-offset 不能把未压缩内容自动对应到压缩后数据流。",
+                    "If you supplied the original loose file, this is usually not an offset issue; --kpa-offset cannot turn uncompressed content into the compressed data stream.",
+                ),
+                loc(
+                    locale,
+                    "建议提供同构的无密码对照 ZIP，或使用 --kpa-offset、-x/--kpa-extra、--kpa-template 等部分明文方式。",
+                    "Use a matching unencrypted reference ZIP, or switch to partial plaintext with --kpa-offset, -x/--kpa-extra, or --kpa-template.",
+                ),
+            ]
+        )
+    elif plain_source.get("source_kind") == "zip":
+        lines.append(
+            loc(
+                locale,
+                "你传入的是明文 ZIP，请确认其中对应条目的压缩方法、压缩参数和文件内容能与目标条目的加密前数据流匹配。",
+                "You supplied a plaintext ZIP; make sure its matching entry uses compatible compression settings and content so it matches the target pre-encryption stream.",
+            )
+        )
+    else:
+        lines.append(
+            loc(
+                locale,
+                "若你手里只有部分明文，可改用 --kpa-offset、-x/--kpa-extra 或 --kpa-template。",
+                "If you only have partial plaintext, try --kpa-offset, -x/--kpa-extra, or --kpa-template instead.",
+            )
+        )
+    return "\n".join(lines)
+
+
+def describe_bkcrack_kpa_input_failure(
+    locale: str,
+    output: str,
+    zip_path: str,
+    inner_name: str,
+    plain_source: Optional[dict],
+) -> list[str]:
+    lower_output = (output or "").lower()
+    if "ciphertext is smaller than plaintext" not in lower_output:
+        return []
+    lines = [
+        loc(
+            locale,
+            "[!] bkcrack 提示 ciphertext is smaller than plaintext，表示提供的明文字节比目标条目的密文载荷还长。",
+            "[!] bkcrack reported ciphertext is smaller than plaintext, meaning the provided plaintext bytes are longer than the target entry payload.",
+        )
+    ]
+    try:
+        target_info = get_kpa_target_entry_info(zip_path, inner_name)
+    except Exception:
+        target_info = None
+
+    if target_info and plain_source and is_user_supplied_plaintext_file(plain_source):
+        lines.extend(kpa_plaintext_layer_warning_lines(locale, target_info, plain_source))
+    elif target_info and plain_source and plain_source.get("source_kind") == "zip":
+        lines.append(
+            loc(
+                locale,
+                f"[*] 当前目标条目压缩方式: {compress_type_label(target_info.compress_type)}。请确认明文 ZIP 中对应条目的压缩后数据能与目标条目匹配。",
+                f"[*] Target compression method: {compress_type_label(target_info.compress_type)}. Make sure the matching entry in the plaintext ZIP produces the same compressed bytes as the target entry.",
+            )
+        )
+    lines.append(
+        loc(
+            locale,
+            "[*] 详情见 docs/KPA_KNOWN_PLAINTEXT_NOTE.md。",
+            "[*] See docs/KPA_KNOWN_PLAINTEXT_NOTE.md for details.",
+        )
+    )
+    return lines
+
+
 def shell_quote_for_display(value: str) -> str:
     if platform.system() == "Windows":
         if not value or any(ch.isspace() for ch in value) or '"' in value:
@@ -2509,6 +2699,12 @@ def build_known_plaintext_attempts(
             plaintext_path,
             locale,
         )
+        warn_if_kpa_plaintext_layer_may_mismatch(
+            zip_path,
+            inner_name,
+            plain_source,
+            locale,
+        )
         return (
             inner_name,
             [
@@ -2535,6 +2731,12 @@ def build_known_plaintext_attempts(
             zip_path,
             inner_name,
             plaintext_path,
+            locale,
+        )
+        warn_if_kpa_plaintext_layer_may_mismatch(
+            zip_path,
+            inner_name,
+            base_source,
             locale,
         )
         for candidate in template_candidates:
@@ -3058,6 +3260,7 @@ def prepare_kpa_context(
             )
         ciphertext = read_zip_entry_ciphertext(zip_file, inner_name)
         payload_len = len(ciphertext) - 12
+        target_info = kpa_target_entry_info_from_zipinfo(inner_name, info, payload_len)
         plain_source = load_known_plaintext_source(
             zip_file,
             inner_name,
@@ -3067,10 +3270,11 @@ def prepare_kpa_context(
         plaintext_bytes = plain_source["plaintext_bytes"]
         if len(plaintext_bytes) != payload_len:
             raise ValueError(
-                loc(
+                describe_kpa_plaintext_length_mismatch(
                     locale,
-                    f"明文长度 ({len(plaintext_bytes)}) 与密文载荷长度 ({payload_len}) 不一致。当前明文来源: {plain_source['display_path']}。若传入的是 ZIP，请确保其中存在与目标条目对应的未加密文件；若传入的是普通文件，请确保它与加密头之后的压缩载荷等长。若你手里只有部分明文，可改用 --kpa-offset、-x/--kpa-extra 或 --kpa-template。",
-                    f"Plaintext length ({len(plaintext_bytes)}) does not match ciphertext payload length ({payload_len}). Current plaintext source: {plain_source['display_path']}. If you supplied a ZIP, make sure it contains the matching unencrypted entry; if you supplied a regular file, it must match the encrypted payload after the 12-byte header. If you only have partial plaintext, try --kpa-offset, -x/--kpa-extra, or --kpa-template instead.",
+                    target_info,
+                    plain_source,
+                    len(plaintext_bytes),
                 )
             )
     print(
@@ -3452,6 +3656,14 @@ def run_bkcrack_known_plaintext_attack(
             combined,
         ):
             print(line)
+        for line in describe_bkcrack_kpa_input_failure(
+            locale,
+            combined,
+            zip_path,
+            inner_name,
+            plain_source,
+        ):
+            print(line)
         return False
 
     keys = parse_bkcrack_keys_from_output(combined)
@@ -3674,6 +3886,26 @@ class PasswordVerifier:
     def reset_thread_archive(self) -> None:
         self.close_thread_archive()
 
+    @staticmethod
+    def _is_retryable_archive_state_error(exc: BaseException) -> bool:
+        return isinstance(
+            exc,
+            (
+                zlib.error,
+                lzma.LZMAError,
+                zipfile.BadZipFile,
+                EOFError,
+                OSError,
+            ),
+        )
+
+    def _verify_password_once(self, password_bytes: bytes) -> bool:
+        if not self.verification_entry:
+            return False
+        archive = self._get_thread_archive()
+        archive.read(self.verification_entry, pwd=password_bytes)
+        return True
+
     def verify_password(self, password: str) -> bool:
         if self.kpa_ciphertext is not None and self.kpa_plaintext_bytes is not None:
             return zipcrypto_plaintext_matches_password(
@@ -3682,19 +3914,25 @@ class PasswordVerifier:
 
         password_bytes = password.encode("utf-8")
         try:
-            archive = self._get_thread_archive()
-            if self.verification_entry:
-                archive.read(self.verification_entry, pwd=password_bytes)
-            else:
-                archive.testzip(pwd=password_bytes)
-            return True
+            return self._verify_password_once(password_bytes)
         except RuntimeError:
             return False
         except KeyboardInterrupt:
             raise
-        except Exception:
+        except Exception as exc:
+            retry = self._is_retryable_archive_state_error(exc)
             self.reset_thread_archive()
-            return False
+            if not retry:
+                return False
+            try:
+                return self._verify_password_once(password_bytes)
+            except RuntimeError:
+                return False
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                self.reset_thread_archive()
+                return False
 
     def extract(self, password: str, out_dir: str) -> list[str]:
         _clean_and_create_outdir(out_dir)
@@ -4213,7 +4451,7 @@ def print_banner(locale: str) -> None:
      / /_| | |_) | | |___| | | (_| | (__|   <  __/ |   
     /____|_| .__/___\____|_|  \__,_|\___|_|\_\___|_|   
            |_| |_____|                                 
-    #Coded By Asaotomo         Update:2026.04.10 (Core Engine Refactor)
+    #Coded By Asaotomo         Update:2026.05.25 (Core Engine Refactor)
             """,
             r"""                          
      ______          ____                _   [*]Hx0 Team
@@ -4222,7 +4460,7 @@ def print_banner(locale: str) -> None:
      / /_| | |_) | | |___| | | (_| | (__|   <  __/ |   
     /____|_| .__/___\____|_|  \__,_|\___|_|\_\___|_|   
            |_| |_____|                                 
-    #Coded By Asaotomo         Update:2026.04.10 (Core Engine Refactor)
+    #Coded By Asaotomo         Update:2026.05.25 (Core Engine Refactor)
             """,
         )
     )

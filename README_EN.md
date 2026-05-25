@@ -219,6 +219,14 @@ Notes:
 3. If you pass a plain file, it still prefers **same-name** matching inside the target ZIP.
 4. If the plaintext ZIP contains **only one** normal file, that file is used automatically.
 
+Important:
+
+- In ZIP known-plaintext attacks, “plaintext” means the byte stream **before ZipCrypto encryption**, not necessarily the original extracted file.
+- If the target entry is `ZIP_STORED`, the original file can usually be used directly as `-kpa` input.
+- If the target entry is `ZIP_DEFLATED` / `ZIP_BZIP2` / `ZIP_LZMA`, the encrypted bytes are usually the compressed data stream. Passing the uncompressed original file may lead to `ciphertext is smaller than plaintext`.
+- `--kpa-offset` only describes where known bytes start inside the pre-encryption byte stream; it cannot map an uncompressed file to compressed data.
+- See the bilingual note in [`docs/KPA_KNOWN_PLAINTEXT_NOTE.md`](docs/KPA_KNOWN_PLAINTEXT_NOTE.md).
+
 Force a specific entry inside the target ZIP:
 
 ```bash

@@ -223,6 +223,14 @@ python3 ZipCracker.py C.zip -kpa M.zip
 3. 如果传入的是普通文件，程序也会优先按同名文件自动匹配 ZIP 内条目
 4. 如果明文 ZIP 里只有一个普通文件，也会自动使用它
 
+重要说明：
+
+- ZIP 的已知明文攻击中，“明文”指 **ZipCrypto 加密前的数据流**，不一定是解压后的原始文件。
+- 如果目标条目是 `ZIP_STORED`，原始文件通常可以直接作为 `-kpa` 输入。
+- 如果目标条目是 `ZIP_DEFLATED` / `ZIP_BZIP2` / `ZIP_LZMA`，被加密的通常是压缩后的数据流，直接传入未压缩原文件可能会出现 `ciphertext is smaller than plaintext`。
+- `--kpa-offset` 只能表示已知字节在加密前数据流里的起始偏移，不能把未压缩原文件自动对应到压缩后数据。
+- 更完整的双语说明见 [`docs/KPA_KNOWN_PLAINTEXT_NOTE.md`](docs/KPA_KNOWN_PLAINTEXT_NOTE.md)。
+
 指定 ZIP 内条目：
 
 ```bash
@@ -429,6 +437,5 @@ clawhub install zipcracker
 **【战队知识星球】福利大放送**
 
 <img height="380" alt="image" src="https://github.com/user-attachments/assets/c9999f9c-2f24-4aca-9b42-c6c58f5d4083" />
-
 
 
