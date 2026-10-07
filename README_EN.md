@@ -1,8 +1,12 @@
-### ZipCracker (New Version) — User Guide
+### ZipCracker v2.2.0 — User Guide
 
 [中文](./README.md)
 
-**ZipCracker** is a **comprehensive ZIP cracking and recovery tool** developed by **Team Hx0**. It is a strong fit for **common ZIP challenges in CTF**, as well as **authorized security testing** and **recovering your own encrypted backups**. It combines **pseudo-encryption detection and repair, dictionary attacks, mask attacks, short-plaintext CRC32 preimage search, and known-plaintext attack (KPA)** into one workflow, with **fast loading of huge wordlists, multi-threaded scheduling**, and **automatic extraction** after success so you can analyze and recover ZIPs **efficiently**.
+**Stable release:** [v2.2.0](https://github.com/asaotomo/ZipCracker/releases/tag/v2.2.0) · [Download the complete ZIP bundle](https://github.com/asaotomo/ZipCracker/releases/download/v2.2.0/ZipCracker-v2.2.0.zip) · [Changelog](./CHANGELOG.md)
+
+**ZipCracker** is a **comprehensive ZIP cracking and recovery tool** developed by **Team Hx0**. It is a strong fit for **common ZIP challenges in CTF**, as well as **authorized security testing** and **recovering your own encrypted backups**. It combines **pseudo-encryption detection and repair, dictionary attacks, mask attacks, short-plaintext CRC32 preimage search, known-plaintext attack (KPA), and nested ZIP recovery** into one workflow, with **fast loading of huge wordlists, multi-threaded scheduling**, and **automatic extraction** after success so you can analyze and recover ZIPs **efficiently**.
+
+**New in v2.2.0:** recursive extraction with `-r`, intermediate cleanup only after complete extraction, backups of colliding output files, and fixes for Windows Unicode output, bundled dictionary lookup, and CRC32 recovery status. Existing commands remain supported.
 
 Use **`ZipCracker_en.py`** for English UI; **`ZipCracker.py`** is the Chinese UI. Both call the same core.
 
@@ -16,6 +20,7 @@ Use **`ZipCracker_en.py`** for English UI; **`ZipCracker.py`** is the Chinese UI
 - Mask attacks
 - Short-plaintext recovery via CRC32 enumeration (1–6 byte entries)
 - Known-plaintext attack (`-kpa`)
+- Nested ZIP extraction (`-r` / `--recursive`)
 - Auto-extract after a successful crack
 
 If you are new here, these three sections are enough to get started:
@@ -38,9 +43,14 @@ python3 ZipCracker_en.py test02.zip
 # 3. Known-plaintext attack
 python3 ZipCracker_en.py test05.zip -kpa test05_plain.txt
 
-# 4. Huge wordlist (recommended)
+# 4. Nested ZIP extraction
+python3 ZipCracker_en.py outer.zip -r
+
+# 5. Huge wordlist (recommended)
 ZIPCRACKER_SKIP_DICT_COUNT=1 python3 ZipCracker_en.py target.zip huge_dict.txt
 ```
+
+Download and extract the complete bundle, then run these commands from its `ZipCracker-v2.2.0` directory. Replace `outer.zip`, `target.zip`, and `huge_dict.txt` with your own paths. `test01.zip` through `test05.zip` are bundled examples.
 
 ### Runtime environment
 
@@ -87,7 +97,7 @@ python3 -m pip install pyzipper
 If the archive uses AES, the script also reminds you that:
 
 1. AES verification and extraction are usually **much slower** than legacy ZipCrypto.
-2. Without `pyzipper`, AES entry checks or extraction may **fail** — install it first when dealing with AES.
+2. If you skip installation, traditional ZipCrypto remains available. Genuine AES archives are kept and ineffective attempts stop; install `pyzipper` and run the command again.
 
 #### 2. `bkcrack`
 
@@ -124,6 +134,8 @@ By default it tries, in order:
 
 1. `password_list.txt`
 2. Numeric passwords from **1** to **6** digits
+
+The current working directory's `password_list.txt` takes priority. If it is absent, the bundled dictionary next to the script is used, including when launching from another directory. An explicitly supplied wordlist file or directory uses the path you provide.
 
 <img width="2948" height="1436" alt="c0169c6d-83a8-45cc-94e4-6aa849dc3f62" src="https://github.com/user-attachments/assets/f0e6a997-c65c-4a3c-8d40-3787b9fc8f7b" />
 
@@ -166,7 +178,7 @@ python3 ZipCracker_en.py test02.zip YourDictDirectory
 
 #### 4. Short-plaintext CRC32 enumeration
 
-For ZIP entries **1–6 bytes** long, the tool can enumerate printable plaintexts whose CRC32 matches the stored value. When a candidate matches, the terminal prompts whether to proceed.
+For ZIP entries **1–6 bytes** long, the tool can enumerate printable plaintexts whose CRC32 matches the stored value. An interactive terminal asks before starting. Only actual candidate matches count as recovered; when all file entries are recovered, their contents are saved to the output directory. CRC32 collisions are possible, so a candidate is not necessarily the unique original plaintext.
 
 ```bash
 python3 ZipCracker_en.py test03.zip
@@ -273,6 +285,47 @@ Difference:
 python3 ZipCracker_en.py test02.zip -o output_dir
 ```
 
+The default is `unzipped_files`. All extraction modes stage and verify the complete contents before publishing results to the specified output paths. Unrelated existing files are kept. Colliding old files are first saved to a sibling `outputname_backup_random` directory. If the input ZIP is inside the output directory, extraction uses an isolated `archivename_extracted` subdirectory to protect it. Traversal paths and symlink members are rejected.
+
+#### 8. Nested ZIP extraction
+
+```bash
+python3 ZipCracker_en.py outer.zip -r
+python3 ZipCracker_en.py outer.zip my_dict.txt -r --max-total-size 8GiB --max-archives 10000
+```
+
+Only ZIPs produced by the current extraction are processed. Unencrypted layers are extracted directly; encrypted layers reuse the dictionary or mask settings. Each nested archive gets a separate, flat `nested_NNNN_name` directory so long chains do not accumulate long paths. The original input is always kept. Intermediate archives are removed only after **complete, verified extraction**; failed or limited archives are kept and listed.
+
+| Option | Behavior |
+| :--- | :--- |
+| `-r`, `--recursive` | Enable nested extraction |
+| `--max-depth N` | Maximum inner depth; default 2048, outer archive is depth 0 |
+| `--max-archives N` | Maximum archive count including the outer archive; default 4096 |
+| `--max-total-size SIZE` | Cumulative extracted bytes; default 1GiB; accepts bytes, KiB, MiB, GiB |
+| `--keep-nested-zips` | Keep successfully extracted intermediate archives |
+
+Size accounting includes intermediate ZIPs and bytes written by failed attempts. Deleting intermediate ZIPs does not restore the budget. These limits apply to recursive mode only. The outer archive keeps the usual interactive workflow; inner layers do not repeatedly prompt for CRC32 enumeration or dependency installation. KPA plaintext/template settings apply only to the outer archive. Exit status is `0` for complete success and `1` if any inner archive remains unresolved or a limit is reached.
+
+See [Output directory](#7-output-directory) for output and backup behavior.
+
+### Non-interactive execution and exit status
+
+When run from scripts, CI, or with redirected input, manual CRC32 enumeration and installation prompts are skipped and available recovery methods continue. Dependency auto-installation can also be configured through the environment variables listed below. Masks exceeding 100 billion candidates require confirmation in an interactive terminal; non-interactive runs stop and ask you to narrow the range.
+
+- `0`: the requested operation succeeded; in recursive mode all discovered inner archives were handled
+- `1`: failure, including unresolved/corrupt inner archives or archives skipped because of resource limits
+- `130`: interrupted by the user
+
+### Version and tests
+
+Current version: `2.2.0`. See [CHANGELOG.md](./CHANGELOG.md). Existing commands, both language entry points, and optional dependency installation remain supported.
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Tests generate temporary fixtures. Integration tests for `pyzipper`, Info-ZIP `zip`, and `bkcrack` run when those optional tools are installed and are skipped otherwise.
+
 ### Huge wordlists
 
 ZipCracker can handle **very large** wordlists without loading the entire file into memory.
@@ -281,6 +334,13 @@ For **10GB+** lists, skip the pre-count pass:
 
 ```bash
 ZIPCRACKER_SKIP_DICT_COUNT=1 python3 ZipCracker_en.py your.zip your_big_dict.txt
+```
+
+Windows PowerShell syntax (applies to the current PowerShell session):
+
+```powershell
+$env:ZIPCRACKER_SKIP_DICT_COUNT = "1"
+python ZipCracker_en.py your.zip your_big_dict.txt
 ```
 
 <img width="2642" height="692" alt="7ee7fc4c-df6f-4b6f-8d0d-cf09079f016e" src="https://github.com/user-attachments/assets/e34f4e2f-1e2a-48f3-9715-c14564196aa4" />
@@ -303,7 +363,7 @@ That is **normal**. AES password checks and decryption are usually **much slower
 For AES entries, without `pyzipper`:
 
 1. The script may prompt you to install (or skip with `n`).
-2. Verification or extraction of AES entries may **fail**.
+2. If genuine AES encryption is detected, the archive is kept, a failure status is returned, and ineffective dictionary scans stop. Install the dependency and retry.
 
 Safest approach: install first.
 
