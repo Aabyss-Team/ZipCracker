@@ -48,7 +48,7 @@ python3 ZipCracker.py outer.zip -r
 ZIPCRACKER_SKIP_DICT_COUNT=1 python3 ZipCracker.py target.zip huge_dict.txt
 ```
 
-下载并解压完整 ZIP 包后，在其中的 `ZipCracker-v2.2.0` 目录运行。`outer.zip`、`target.zip` 和 `huge_dict.txt` 为示例路径，请替换成自己的文件；`test01.zip`～`test05.zip` 是随包提供的样例。
+下载并解压完整 ZIP 包后，在其中的 `ZipCracker-v2.2.0` 目录运行。`outer.zip`、`target.zip` 和 `huge_dict.txt` 为示例路径，请替换成自己的文件；`test01.zip`～`test06.zip` 是随包提供的样例，其中 `test06.zip` 是套娃解压样例（见[套娃解压](#8-套娃解压递归处理嵌套压缩包)）。
 
 ### 运行环境
 
@@ -314,6 +314,15 @@ python3 ZipCracker.py outer.zip -r
 5. 嵌套层不重复询问 CRC32 枚举或安装依赖；最外层仍保留交互流程。KPA 明文/模板参数仅作用于最外层，内层复用字典/掩码
 6. 损坏包、部分条目解压失败或密码不一致的包会保留，并在结束时统一列出
 
+随包提供的 `test06.zip` 就是一个五层套娃样例，各层分别走内置字典（最外层、第 2 层）、伪加密修复（第 1 层）、1-6 位纯数字字典（第 3 层）和直接解压（第 4 层）四条不同路径，可用来验证整条递归流程：
+
+```bash
+python3 ZipCracker.py test06.zip -r
+```
+
+<img width="1547" height="940" alt="image" src="https://github.com/user-attachments/assets/e324f9d7-8309-4b27-8c3a-99cdbdfbc96d" />
+
+
 可选参数：
 
 | 参数 | 说明 |
@@ -512,4 +521,4 @@ clawhub install zipcracker
 
 **【战队知识星球】福利大放送**
 
-<img height="380" alt="image" src="https://github.com/user-attachments/assets/c9999f9c-2f24-4aca-9b42-c6c58f5d4083" />
+<img height="380" alt="知识星球优惠券" src="https://github.com/user-attachments/assets/5d68553e-0b70-44a4-b26d-a019c9a8d3dd" />

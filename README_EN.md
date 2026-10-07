@@ -50,7 +50,7 @@ python3 ZipCracker_en.py outer.zip -r
 ZIPCRACKER_SKIP_DICT_COUNT=1 python3 ZipCracker_en.py target.zip huge_dict.txt
 ```
 
-Download and extract the complete bundle, then run these commands from its `ZipCracker-v2.2.0` directory. Replace `outer.zip`, `target.zip`, and `huge_dict.txt` with your own paths. `test01.zip` through `test05.zip` are bundled examples.
+Download and extract the complete bundle, then run these commands from its `ZipCracker-v2.2.0` directory. Replace `outer.zip`, `target.zip`, and `huge_dict.txt` with your own paths. `test01.zip` through `test06.zip` are bundled examples; `test06.zip` is the nested one (see [Nested ZIP extraction](#8-nested-zip-extraction)).
 
 ### Runtime environment
 
@@ -296,6 +296,13 @@ python3 ZipCracker_en.py outer.zip my_dict.txt -r --max-total-size 8GiB --max-ar
 
 Only ZIPs produced by the current extraction are processed. Unencrypted layers are extracted directly; encrypted layers reuse the dictionary or mask settings. Each nested archive gets a separate, flat `nested_NNNN_name` directory so long chains do not accumulate long paths. The original input is always kept. Intermediate archives are removed only after **complete, verified extraction**; failed or limited archives are kept and listed.
 
+The bundled `test06.zip` is a five-layer nested sample whose layers take four different paths — the built-in dictionary (outer archive and layer 2), pseudo-encryption repair (layer 1), the automatic 1-6 digit numeric dictionary (layer 3) and plain extraction (layer 4) — so it can be used to verify the whole recursive flow:
+
+```bash
+python3 ZipCracker_en.py test06.zip -r
+```
+<img width="1547" height="940" alt="image" src="https://github.com/user-attachments/assets/f4a8860f-c518-459a-a732-3441bbb60b5a" />
+
 | Option | Behavior |
 | :--- | :--- |
 | `-r`, `--recursive` | Enable nested extraction |
@@ -475,4 +482,4 @@ Do **not** use it for unauthorized access or other illegal purposes.
 
 **Team knowledge planet**
 
-<img height="380" alt="Knowledge planet" src="https://github.com/user-attachments/assets/c9999f9c-2f24-4aca-9b42-c6c58f5d4083" />
+<img height="380" alt="Knowledge planet" src="https://github.com/user-attachments/assets/5d68553e-0b70-44a4-b26d-a019c9a8d3dd" />
